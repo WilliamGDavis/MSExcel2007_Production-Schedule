@@ -1,3 +1,7 @@
+'Created by William G Davis 2015
+'Copyright 2015 William G Davis
+'You have permission to use or modify this code for any appliation, private or commercial.  You do not need to have written permission.
+
 Public Sub fullFormat()
     Dim OriginalCellValue As String
     Dim projectNumber As String
