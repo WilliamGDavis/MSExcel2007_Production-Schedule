@@ -2,34 +2,31 @@
 'Copyright 2015 William G Davis
 'You have permission to use or modify this code for any appliation, private or commercial.  You do not need to have written permission.
 
-Public Sub fullFormat()
-    Dim OriginalCellValue As String
-    Dim projectNumber As String
-    Dim projectDescription As String
-    Dim projectStatus As String
-    Dim statusColor As String
-    Dim poNumber As String
-    Dim CompanyName As String
-    Dim DateReceived As String
-    Dim DateRequired As String
-    Dim Salesman As String
-    Dim toolComplete As String
-    Dim toolIncomplete As String
-    Dim toolCompleteCount As Integer
-    Dim columnOfa As String
-    Dim columnEngineeringRelease As String
-    Dim columnPCDRelease As String
-    Dim columnMachiningRelease As String
-    Dim columnAssemblyRelease As String
-    Dim columnBuyOff As String
-    Dim columnNotes As String
-    Dim notes() As String
-    Dim notesPublicOnly As Boolean
-    Dim needPCD As Boolean
-    Dim lastRow As Integer
-    Dim xSheet As Worksheet
-    Dim engAccepted As String
+Public ColumnList As Object
+Public Project As Object
+
+Public Sub CreateProductionSchedule()
+    'Replace all (NULL) values with empty spaces
+    Call FindReplaceAll
     
+    'Build the Workbook Structure
+    Call BuildWorksheets
+    
+    'Format the Worksheets
+    Call FormatWorksheets
+    
+    'Set the active worksheet to "Production Schedule"
+    ActiveWorkbook.Worksheets(1).Activate
+    
+    'Populate the ColumnList Dictionary
+    Call PopulateColumnList
+    
+    'Fill the Spreadsheets with data, ignoring the Source Data sheet
+    Call FillData
+
+End Sub
+
+Private Sub BuildWorksheets()
     'Rename the Production Schedule report sheet
     With ActiveWorkbook.Sheets(1)
         .Name = "Production Schedule"
@@ -46,194 +43,220 @@ Public Sub fullFormat()
         .Add(After:=Worksheets("Shop Schedule")).Name = "Buy-Off Schedule"
     End With
     
-    'Set the active worksheet to "Production Schedule"
-    ActiveWorkbook.Worksheets("Production Schedule").Activate
+    'Copy the source spreadsheet to the end of the workbook
+    With ActiveWorkbook.Sheets(1)
+        .Copy After:=Worksheets("Buy-Off Schedule")
+    End With
     
-    'Populate the spreadsheets with data
-    Call fillData
-    
-    For Each xSheet In ActiveWorkbook.Sheets
-        'Set the active worksheet to "Production Schedule"
-        xSheet.Activate
-        
+    Application.ScreenUpdating = False
+    With ActiveWorkbook.Sheets(9)
+        .Name = "Source Data"
+        'Add the buttons for MS Project generation
+        .Range("A1").EntireColumn.Insert
+        Dim btn As Button
+'        .Buttons.Delete
+        Dim t As Range
+        Dim c As Integer
+        c = .UsedRange.Rows.Count - 1
+        For i = 2 To c
+          Set t = ActiveWorkbook.Worksheets("Source Data").Range(Cells(i, 1), Cells(i, 1))
+          Set btn = ActiveSheet.Buttons.Add(t.Left, t.Top, t.Width, t.Height)
+          With btn
+            .OnAction = "showForm"
+            .Caption = "Build MS Project"
+            .Name = "Btn" & i
+          End With
+        Next i
+    End With
+    Application.ScreenUpdating = True
+End Sub
+
+Private Sub FormatWorksheets()
+    'Setup all Worksheets for printing
+    For Each xWorkSheet In ActiveWorkbook.Worksheets
         'Set the font
-        With xSheet.Cells.Font
+        With xWorkSheet.Cells.Font
             .Size = 10
             .Name = "Arial Light"
         End With
         
-        'Determine whether to print the private notes on a sheet or not
-        If xSheet.Name = "Unified Industries" Or _
-            xSheet.Name = "PTS" Then
-            notesPublicOnly = True
-        Else
-            notesPublicOnly = False
-        End If
-        
-        
-        'Grab all the cells from the "A2" cell to the bottom of column "A"
-        For Each xCell In xSheet.Range(Range("A2"), Range("A2").End(xlDown))
-            OriginalCellValue = Trim(xCell.Value)
-            projectNumber = Trim(Split(OriginalCellValue, ":")(0))
-            projectDescription = Trim(Split(OriginalCellValue, ":")(1))
-            projectStatus = Trim(Cells(xCell.Row, xCell.Column + 2))
-            statusColor = GetStatusColor(projectStatus)
-            poNumber = "(" & Trim(Cells(xCell.Row, xCell.Column + 16)) & ")"
-            CompanyName = Trim(Cells(xCell.Row, xCell.Column + 1))
-            DateReceived = Trim(Cells(xCell.Row, xCell.Column + 3))
-            DateRequired = Trim(Cells(xCell.Row, xCell.Column + 4))
-            Salesman = Trim(Cells(xCell.Row, xCell.Column + 18))
-            toolComplete = Trim(Cells(xCell.Row, xCell.Column + 19))
-            toolIncomplete = Trim(Cells(xCell.Row, xCell.Column + 20))
-            toolCompleteCount = Len(toolComplete) + 1
-            columnOfa = Trim(Cells(xCell.Row, xCell.Column + 13))
-            columnEngineeringRelease = Trim(Cells(xCell.Row, xCell.Column + 11))
-            columnPCDRelease = Trim(Cells(xCell.Row, xCell.Column + 14))
-            columnMachiningRelease = Trim(Cells(xCell.Row, xCell.Column + 12))
-            columnAssemblyRelease = Trim(Cells(xCell.Row, xCell.Column + 7))
-            columnBuyOff = Trim(Cells(xCell.Row, xCell.Column + 8))
-            columnNotes = Trim(Cells(xCell.Row, xCell.Column + 5))
-            notes() = Split(columnNotes, "||PRIVATE NOTES||")
-            needPCD = Cells(xCell.Row, xCell.Column + 15)
-            engAccepted = Cells(xCell.Row, xCell.Column + 10)
-            
-            'Convert the salesman's name into their initials
-            Salesman = returnSalesman(Salesman)
-            
-            'Add a dash (-) to the incomplete portion of the tool if it exists
-            toolIncomplete = checkDash(toolComplete, toolIncomplete)
-            
-            'Return the color of the current status
-            statusColor = GetStatusColor(projectStatus)
-            
-            'Format the text in the columns
-            Call outputColumnA(xCell, xSheet, statusColor)
-            Call outputColumnB(xCell, xSheet, projectNumber, poNumber, CompanyName, DateReceived, Salesman, DateRequired)
-            Call outputColumnC(xCell, xSheet, projectDescription, toolComplete, toolIncomplete, projectStatus)
-            Call outputColumnD(xCell, xSheet, columnOfa)
-            Call outputColumnE(xCell, xSheet, columnEngineeringRelease, engAccepted)
-            Call outputColumnF(xCell, xSheet, columnPCDRelease)
-            Call outputColumnG(xCell, xSheet, columnMachiningRelease)
-            Call outputColumnH(xCell, xSheet, columnAssemblyRelease)
-            Call outputColumnI(xCell, xSheet, columnBuyOff)
-            Call outputColumnJ(xCell, xSheet, notes, notesPublicOnly)
-            
-            'Bold the Job Numbers in the Project Info column
-            Call boldJobNumber(xCell, xSheet)
-            
-            'Bold the complete portion of the tool description
-            Call boldToolDescription(xCell, xSheet, projectDescription, toolCompleteCount)
-            
-            'Color the Engineering Accepted as green
-            'Call formatEngAccepted(xCell, xSheet, engAccepted)
-        Next
-        
-        'Format the columns
-        Call formatColumns(xSheet)
-        
-        'Shade every other row
-        Call ShadeEveryOtherRow(xSheet)
-        
-        'Put a border around all the cells used
-        With xSheet.Range("A:J")
-            .Borders.LineStyle = xlContinuous
+        With xWorkSheet.pageSetup
+         .Orientation = xlLandscape
+         .PaperSize = xlPaperTabloid
+         .CenterHorizontally = True
+         .Zoom = False
+         .FitToPagesWide = 1
+         .FitToPagesTall = False
+         .LeftMargin = Application.InchesToPoints(0.25)
+         .RightMargin = Application.InchesToPoints(0.25)
+         .TopMargin = Application.InchesToPoints(0.5)
+         .BottomMargin = Application.InchesToPoints(0.75)
+         .HeaderMargin = Application.InchesToPoints(0.25)
+         .FooterMargin = Application.InchesToPoints(0.25)
+         .PrintTitleRows = "$1:$1"
         End With
     Next
-    
-    'Format the sheets for printing
-    Call pageSetup
 End Sub
 
-Public Sub fillData()
-'Grab all the cells from the "A2" cell to the bottom of column "A"
-For Each xCell In Sheets("Production Schedule").Range(Range("A2"), Range("A2").End(xlDown))
-    OriginalCellValue = Trim(xCell.Value)
-    projectNumber = Trim(Split(OriginalCellValue, ":")(0))
-    projectDescription = Trim(Split(OriginalCellValue, ":")(1))
-    projectStatus = Trim(Cells(xCell.Row, xCell.Column + 2))
-    statusColor = GetStatusColor(projectStatus)
-    poNumber = "(" & Trim(Cells(xCell.Row, xCell.Column + 16)) & ")"
-    CompanyName = Trim(Cells(xCell.Row, xCell.Column + 1))
-    DateReceived = Trim(Cells(xCell.Row, xCell.Column + 3))
-    DateRequired = Trim(Cells(xCell.Row, xCell.Column + 4))
-    Salesman = Trim(Cells(xCell.Row, xCell.Column + 18))
-    toolComplete = Trim(Cells(xCell.Row, xCell.Column + 19))
-    toolIncomplete = Trim(Cells(xCell.Row, xCell.Column + 20))
-    toolCompleteCount = Len(toolComplete) + 1
-    columnOfa = Trim(Cells(xCell.Row, xCell.Column + 13))
-    columnEngineeringRelease = Trim(Cells(xCell.Row, xCell.Column + 11))
-    columnPCDRelease = Trim(Cells(xCell.Row, xCell.Column + 14))
-    columnMachiningRelease = Trim(Cells(xCell.Row, xCell.Column + 12))
-    columnAssemblyRelease = Trim(Cells(xCell.Row, xCell.Column + 7))
-    columnBuyOff = Trim(Cells(xCell.Row, xCell.Column + 8))
-    columnNotes = Trim(Cells(xCell.Row, xCell.Column + 5))
-    needPCD = Cells(xCell.Row, xCell.Column + 15)
+Public Function PopulateColumnList()
+    'Set ColumnList to a Dictionary Object
+    Set ColumnList = CreateObject("Scripting.Dictionary")
+    
+    'Populate the ColumnList Dictionary for Global access
+    ColumnList.Add "Project", FindColumnInt("Project")
+    ColumnList.Add "Description", FindColumnInt("Description")
+    ColumnList.Add "Current Status", FindColumnInt("Current Status")
+    ColumnList.Add "Date Start", FindColumnInt("Date Start")
+    ColumnList.Add "Date Req", FindColumnInt("Date Req")
+    ColumnList.Add "Notes", FindColumnInt("Notes")
+    ColumnList.Add "A_Buy-Off", FindColumnInt("A_Buy-Off")
+    ColumnList.Add "A_Eng Accept", FindColumnInt("A_Eng Accept")
+    ColumnList.Add "A_Eng Releas", FindColumnInt("A_Eng Releas")
+    ColumnList.Add "A_OFA", FindColumnInt("A_OFA")
+    ColumnList.Add "A_PCD Releas", FindColumnInt("A_PCD Releas")
+    ColumnList.Add "Approved", FindColumnInt("Approved")
+    ColumnList.Add "Assm Release", FindColumnInt("Assm Release")
+    ColumnList.Add "Cust Job No.", FindColumnInt("Cust Job No.")
+    ColumnList.Add "Duration Bld", FindColumnInt("Duration Bld")
+    ColumnList.Add "Duration Eng", FindColumnInt("Duration Eng")
+    ColumnList.Add "Duration Tot", FindColumnInt("Duration Tot")
+    ColumnList.Add "P_Buy-Off", FindColumnInt("P_Buy-Off")
+    ColumnList.Add "P_Eng Accept", FindColumnInt("P_Eng Accept")
+    ColumnList.Add "P_Eng Releas", FindColumnInt("P_Eng Releas")
+    ColumnList.Add "P_Fab Releas", FindColumnInt("P_Fab Releas")
+    ColumnList.Add "P_OFA", FindColumnInt("P_OFA")
+    ColumnList.Add "P_PCD Releas", FindColumnInt("P_PCD Releas")
+    ColumnList.Add "PCD Required", FindColumnInt("PCD Required")
+    ColumnList.Add "PO Confirm", FindColumnInt("PO Confirm")
+    ColumnList.Add "PO No", FindColumnInt("PO No")
+    ColumnList.Add "Quote No", FindColumnInt("Quote No")
+    ColumnList.Add "Salesman", FindColumnInt("Salesman")
+    ColumnList.Add "SO No.", FindColumnInt("SO No.")
+    ColumnList.Add "ToolComp", FindColumnInt("ToolComp")
+    ColumnList.Add "ToolIncomp", FindColumnInt("ToolIncomp")
+End Function
 
+Private Function FindColumnInt(ColumnName As String) As Integer
+    Dim aCell As Range
+
+    Set aCell = ActiveWorkbook.ActiveSheet.Rows(1).Find(what:=ColumnName, LookIn:=xlValues, _
+                LookAt:=xlWhole, SearchOrder:=xlByRows, SearchDirection:=xlNext, _
+                MatchCase:=False, SearchFormat:=False)
     
-    '========================  OUTPUT  ============================
-    'Unified Industries Schedule
-    If (InStr(CompanyName, "Unified Industries") <> 0) Then
-        lastRow = Sheets("Unified Industries").UsedRange.Rows.Count + 1
-        Rows(xCell.Row).Copy Destination:=Sheets("Unified Industries").Rows(lastRow)
-    End If
+    FindColumnInt = aCell.Column
+End Function
+
+Public Sub FillData()
+    'Set ColumnList to a Dictionary Object
+    Set Project = CreateObject("Scripting.Dictionary")
     
-    'PTS - Power Tools & Supply
-    If (InStr(CompanyName, "PTS") <> 0) Then
-        lastRow = Sheets("PTS").UsedRange.Rows.Count + 1
-        Rows(xCell.Row).Copy Destination:=Sheets("PTS").Rows(lastRow)
-    End If
+    'Grab all the cells from the "A2" cell to the bottom of column "A"
+    For Each xCell In Sheets("Production Schedule").Range(Range("A2"), Range("A2").End(xlDown))
+        Call UpdateDataset(xCell) 'Update the Dataset for each row
+
+        '========================  OUTPUT  ============================
+        'Unified Industries Schedule
+        If (InStr(Project("Company Name"), "Unified Industries") <> 0) Then
+            lastRow = ActiveWorkbook.Sheets("Unified Industries").UsedRange.Rows.Count + 1
+            Rows(xCell.Row).Copy Destination:=Sheets("Unified Industries").Rows(lastRow)
+        End If
+
+        'PTS - Power Tools & Supply
+        If (InStr(Project("Company Name"), "PTS") <> 0) Then
+            lastRow = Sheets("PTS").UsedRange.Rows.Count + 1
+            Rows(xCell.Row).Copy Destination:=Sheets("PTS").Rows(lastRow)
+        End If
+        
+        'Sales Schedule
+        If (Project("Current Status") = "OFA" Or _
+            Project("Current Status") = "OFA: Approved" Or _
+            Project("Current Status") = "Sales: Discovery" Or _
+            Project("Current Status") = "Sales: PM Review" Or _
+            Project("Current Status") = "Sales: Team Review") Then
+            lastRow = Sheets("Sales Schedule").UsedRange.Rows.Count + 1
+            Rows(xCell.Row).Copy Destination:=Sheets("Sales Schedule").Rows(lastRow)
+        End If
+        
+        'Engineering Schedule
+        If (Project("Current Status") = "Engineering: New Project" Or _
+            Project("Current Status") = "Concept: In-Progress" Or _
+            Project("Current Status") = "Concept: Review" Or _
+            Project("Current Status") = "Concept: Rework" Or _
+            Project("Current Status") = "Detail: In-Progress" Or _
+            Project("Current Status") = "Detail: Review" Or _
+            Project("Current Status") = "Detail: Rework" Or _
+            Project("Current Status") = "OFA" Or _
+            Project("Current Status") = "OFA: Approved") Then
+            lastRow = Sheets("Engineering Schedule").UsedRange.Rows.Count + 1
+            Rows(xCell.Row).Copy Destination:=Sheets("Engineering Schedule").Rows(lastRow)
+        End If
     
-    'Sales Schedule
-    If (projectStatus = "OFA" Or _
-        projectStatus = "OFA: Approved" Or _
-        projectStatus = "Sales: Discovery" Or _
-        projectStatus = "Sales: PM Review" Or _
-        projectStatus = "Sales: Team Review") Then
-        lastRow = Sheets("Sales Schedule").UsedRange.Rows.Count + 1
-        Rows(xCell.Row).Copy Destination:=Sheets("Sales Schedule").Rows(lastRow)
-    End If
+        'Controls Schedule
+        If (Project("PCD Required") = True) Then
+            lastRow = Sheets("Controls Schedule").UsedRange.Rows.Count + 1
+            Rows(xCell.Row).Copy Destination:=Sheets("Controls Schedule").Rows(lastRow)
+        End If
     
-    'Engineering Schedule
-    If (projectStatus = "Engineering: New Project" Or _
-        projectStatus = "Concept: In-Progress" Or _
-        projectStatus = "Concept: Review" Or _
-        projectStatus = "Concept: Rework" Or _
-        projectStatus = "Detail: In-Progress" Or _
-        projectStatus = "Detail: Review" Or _
-        projectStatus = "Detail: Rework" Or _
-        projectStatus = "OFA" Or _
-        projectStatus = "OFA: Approved") Then
-        lastRow = Sheets("Engineering Schedule").UsedRange.Rows.Count + 1
-        Rows(xCell.Row).Copy Destination:=Sheets("Engineering Schedule").Rows(lastRow)
-    End If
+        'Shop Schedule
+        If (Project("Current Status") = "Build: In-Progress" Or _
+            Project("Current Status") = "Fabrication: In-Progress" Or _
+            Project("Current Status") = "Fabrication: Complete" Or _
+            Project("Current Status") = "Machining: In-Progress" Or _
+            Project("Current Status") = "Machining: Complete" Or _
+            Project("Current Status") = "Paint: In-Progress" Or _
+            Project("Current Status") = "Paint: Complete" Or _
+            Project("Current Status") = "Assembly: In-Progress" Or _
+            Project("Current Status") = "Assembly: Complete") Then
+            lastRow = Sheets("Shop Schedule").UsedRange.Rows.Count + 1
+            Rows(xCell.Row).Copy Destination:=Sheets("Shop Schedule").Rows(lastRow)
+        End If
     
-    'Controls Schedule
-    If (needPCD = True) Then
-        lastRow = Sheets("Controls Schedule").UsedRange.Rows.Count + 1
-        Rows(xCell.Row).Copy Destination:=Sheets("Controls Schedule").Rows(lastRow)
-    End If
+        'Buy-Off Schedule
+        If (Not Project("Actual BuyOff") = "") Then
+            lastRow = Sheets("Buy-Off Schedule").UsedRange.Rows.Count + 1
+            Rows(xCell.Row).Copy Destination:=Sheets("Buy-Off Schedule").Rows(lastRow)
+        End If
+        '======================  END OUTPUT  ===========================
+    Next
     
-    'Shop Schedule
-    If (projectStatus = "Build: In-Progress" Or _
-        projectStatus = "Fabrication: In-Progress" Or _
-        projectStatus = "Fabrication: Complete" Or _
-        projectStatus = "Machining: In-Progress" Or _
-        projectStatus = "Machining: Complete" Or _
-        projectStatus = "Paint: In-Progress" Or _
-        projectStatus = "Paint: Complete" Or _
-        projectStatus = "Assembly: In-Progress" Or _
-        projectStatus = "Assembly: Complete") Then
-        lastRow = Sheets("Shop Schedule").UsedRange.Rows.Count + 1
-        Rows(xCell.Row).Copy Destination:=Sheets("Shop Schedule").Rows(lastRow)
-    End If
-    
-    'Buy-Off Schedule
-    If (Not columnBuyOff = "") Then
-        lastRow = Sheets("Buy-Off Schedule").UsedRange.Rows.Count + 1
-        Rows(xCell.Row).Copy Destination:=Sheets("Buy-Off Schedule").Rows(lastRow)
-    End If
-    '======================  END OUTPUT  ===========================
-Next
+    'Combine Variables in the Dataset and output them to the spreadsheets
+    For Each xWorkSheet In ActiveWorkbook.Worksheets
+        If (Not xWorkSheet.Name = "Source Data") Then 'Skip the Source Data Sheet
+            xWorkSheet.Activate
+            For Each xRow In xWorkSheet.Range(Range("A2"), Range("A2").End(xlDown))
+                'Update the dataset for each row iteration
+                Call UpdateDataset(xRow)
+                            
+                'Output the formatted data
+                Call OutputColumnA(xRow, xWorkSheet)
+                Call OutputColumnB(xRow, xWorkSheet)
+                Call OutputColumnC(xRow, xWorkSheet)
+                Call OutputColumnD(xRow, xWorkSheet)
+                Call OutputColumnE(xRow, xWorkSheet)
+                Call OutputColumnF(xRow, xWorkSheet)
+                Call OutputColumnG(xRow, xWorkSheet)
+                Call OutputColumnH(xRow, xWorkSheet)
+                Call OutputColumnI(xRow, xWorkSheet)
+                Call OutputColumnJ(xRow, xWorkSheet)
+                
+                'Bold the Job Numbers in the Project Info column
+                Call BoldJobNumber(xRow, xWorkSheet)
+                
+                'Bold the complete portion of the tool description
+                Call BoldToolDescription(xRow, xWorkSheet)
+                
+                'Shade every other row
+                Call ShadeEveryOtherRow(xWorkSheet)
+            
+                'Put a border around all the cells used
+                With xWorkSheet.Range("A:J")
+                    .Borders.LineStyle = xlContinuous
+            End With
+        Next
+        'Format the columns
+        Call FormatColumns(xWorkSheet)
+        End If
+    Next
 End Sub
 
 Public Function GetStatusColor(projectStatus) As String
@@ -278,97 +301,84 @@ Public Function GetStatusColor(projectStatus) As String
     End If
 End Function
 
-Public Function checkDash(toolComplete, toolIncomplete) As String
-    If (Not toolIncomplete = "") Then
-        If (toolComplete = "") Then
-            checkDash = toolIncomplete
-        Else
-            checkDash = "-" & toolIncomplete
-        End If
+Public Function ReturnSalesman(Salesman) As String
+    If (Salesman = "Mike Johnson") Then
+        ReturnSalesman = "MJ"
+    ElseIf (Salesman = "Kevin McDonald") Then
+        ReturnSalesman = "KM"
+    ElseIf (Salesman = "Mike Stevenson") Then
+        ReturnSalesman = "MS"
+    Else
+        ReturnSalesman = "NA"
     End If
 End Function
 
-Public Function outputColumnA(xCell, xSheet, statusColor)
-    With xSheet.Cells(xCell.Row, xCell.Column)
+Public Function OutputColumnA(xRow, xWorkSheet)
+    With xWorkSheet.Cells(xRow.Row, xRow.Column)
         .Value = ""
-        .Interior.ColorIndex = statusColor
+        .Interior.ColorIndex = Project("Status Color")
     End With
 End Function
-
-Public Function outputColumnB(xCell, xSheet, projectNumber, poNumber, CompanyName, DateReceived, Salesman, DateRequired)
-    With xSheet.Cells(xCell.Row, xCell.Column + 1)
-        .Value = projectNumber & "  " & poNumber & _
+Public Function OutputColumnB(xRow, xWorkSheet)
+    With xWorkSheet.Cells(xRow.Row, xRow.Column + 1)
+        .Value = Project("Number") & "  " & Project("PO Number") & " " & Project("Quote Number") & _
                  Chr(10) & _
-                 CompanyName & _
+                 Project("Company Name") & _
                  Chr(10) & _
-                 DateReceived & "    " & Salesman & "    " & DateRequired
+                 Project("Date Received") & "    " & Project("Salesman") & "    " & Project("Date Required")
     End With
 End Function
-
-Public Function outputColumnC(xCell, xSheet, projectDescription, toolComplete, toolIncomplete, projectStatus)
-    With xSheet.Cells(xCell.Row, xCell.Column + 2)
-        .Value = projectDescription & _
+Public Function OutputColumnC(xRow, xWorkSheet)
+    With xWorkSheet.Cells(xRow.Row, xRow.Column + 2)
+        .Value = Project("Description") & _
                  Chr(10) & _
-                 toolComplete & toolIncomplete & _
+                 Project("Full Tool") & _
                  Chr(10) & _
-                 projectStatus
+                 Project("Current Status")
     End With
 End Function
 
-Public Function outputColumnD(xCell, xSheet, columnOfa)
-    With xSheet.Cells(xCell.Row, xCell.Column + 3)
-        .Value = columnOfa
-    End With
+Public Function OutputColumnD(xRow, xWorkSheet)
+    Call FormatProjectedActual(xRow, xWorkSheet, Project("Projected Engineering Accept"), Project("Actual Engineering Accept"), 3)
 End Function
 
-Public Function outputColumnE(xCell, xSheet, columnEngineeringRelease, engAccepted)
-If (engAccepted = "") Then
-    With xSheet.Cells(xCell.Row, xCell.Column + 4)
-        .Value = columnEngineeringRelease
-    End With
-Else
-    With xSheet.Cells(xCell.Row, xCell.Column + 4)
-        .Value = engAccepted & _
-                    Chr(10) & _
-                    columnEngineeringRelease
-    End With
-    Call formatEngAccepted(xCell, xSheet, engAccepted, columnEngineeringRelease)
-End If
-    
+Public Function OutputColumnE(xRow, xWorkSheet)
+    Call FormatProjectedActual(xRow, xWorkSheet, Project("Projected OFA"), Project("Actual OFA"), 4)
 End Function
 
-Public Function outputColumnF(xCell, xSheet, columnPCDRelease)
-    With xSheet.Cells(xCell.Row, xCell.Column + 5)
-        .Value = columnPCDRelease
-    End With
+Public Function OutputColumnF(xRow, xWorkSheet)
+    Call FormatProjectedActual(xRow, xWorkSheet, Project("Projected Engineering Release"), Project("Actual Engineering Release"), 5)
 End Function
 
-Public Function outputColumnG(xCell, xSheet, columnMachiningRelease)
-    With xSheet.Cells(xCell.Row, xCell.Column + 6)
-        .Value = columnMachiningRelease
-    End With
+Public Function OutputColumnG(xRow, xWorkSheet)
+    Call FormatProjectedActual(xRow, xWorkSheet, Project("Projected PCD Release"), Project("Actual PCD Release"), 6)
 End Function
 
-Public Function outputColumnH(xCell, xSheet, columnAssemblyRelease)
-    With xSheet.Cells(xCell.Row, xCell.Column + 7)
-        .Value = columnAssemblyRelease
-    End With
+Public Function OutputColumnH(xRow, xWorkSheet)
+    Call FormatProjectedActual(xRow, xWorkSheet, Project("Projected Machining Release"), Project("Actual Machining Release"), 7)
 End Function
 
-Public Function outputColumnI(xCell, xSheet, columnBuyOff)
-    With xSheet.Cells(xCell.Row, xCell.Column + 8)
-        .Value = columnBuyOff
-    End With
+Public Function OutputColumnI(xRow, xWorkSheet)
+    Call FormatProjectedActual(xRow, xWorkSheet, Project("Projected BuyOff"), Project("Actual BuyOff"), 8)
 End Function
 
-Public Function outputColumnJ(xCell, xSheet, notes, notesPublicOnly)
-    Dim publicNotes As String: publicNotes = notes(0)
-    Dim privateNotes As String: privateNotes = notes(1)
+Public Function OutputColumnJ(xRow, xWorkSheet)
+    Dim publicNotes As String: publicNotes = Project("Notes")(0)
+    Dim privateNotes As String: privateNotes = Project("Notes")(1)
     Dim completeNotes As String: completeNotes = ""
+    Dim notesPublicOnly As Boolean
     
+    If (xWorkSheet.Name = "Unified Industries" Or _
+        xWorkSheet.Name = "PTS") Then
+        notesPublicOnly = True
+    Else
+        notesPublicOnly = False
+    End If
+    
+
     If (notesPublicOnly = True) Then
         If Not (publicNotes = "") Then
-            With xSheet.Cells(xCell.Row, xCell.Column + 9)
+            With xWorkSheet.Cells(xRow.Row, xRow.Column + 9)
                 .Value = completeNotes & publicNotes
             End With
         End If
@@ -379,155 +389,224 @@ Public Function outputColumnJ(xCell, xSheet, notes, notesPublicOnly)
         If Not (privateNotes = "") Then
             completeNotes = completeNotes & Chr(10) & "====================== Private ======================" & Chr(10) & privateNotes
         End If
-        With xSheet.Cells(xCell.Row, xCell.Column + 9)
+        With xWorkSheet.Cells(xRow.Row, xRow.Column + 9)
             .Value = completeNotes
         End With
     End If
 End Function
 
-Public Function outputColumnStatusColor(xCell, statusColor)
-    With Cells(xCell.Row, xCell.Column)
+Public Function UpdateDataset(xCell)
+    'Update the Project Dictionary Variables
+    Project("OriginalCellValue") = Trim(xCell.Value)
+    Project("Number") = Trim(Split(xCell.Value, ":")(0))
+    Project("Description") = Trim(Split(xCell.Value, ":")(1))
+    Project("Current Status") = Trim(Cells(xCell.Row, ColumnList("Current Status")))
+    Project("Status Color") = GetStatusColor(Project("Current Status"))
+    Project("PO Number") = "(" & Trim(Cells(xCell.Row, ColumnList("PO No"))) & ")"
+    Project("Quote Number") = "(" & Trim(Cells(xCell.Row, ColumnList("Quote No"))) & ")"
+    Project("Company Name") = Trim(Cells(xCell.Row, ColumnList("Description")))
+    Project("Date Received") = Trim(Cells(xCell.Row, ColumnList("Date Start")))
+    Project("Date Required") = Trim(Cells(xCell.Row, ColumnList("Date Req")))
+    Project("Salesman") = ReturnSalesman(Trim(Cells(xCell.Row, ColumnList("Salesman"))))
+    Project("Tool Complete") = Trim(Cells(xCell.Row, ColumnList("ToolComp")))
+    Project("Tool Incomplete") = Trim(Cells(xCell.Row, ColumnList("ToolIncomp")))
+    Project("Full Tool") = CheckDash
+    Project("Tool Complete Count") = Len(Project("Tool Complete")) + 1
+    Project("Actual Assembly Release") = Trim(Cells(xCell.Row, ColumnList("Assm Release")))
+'    Project("Actual Buy-Off") = Trim(Cells(xCell.Row, ColumnList("A_Buy-Off")))
+    Project("Notes") = Trim(Cells(xCell.Row, ColumnList("Notes")))
+    Project("PCD Required") = Cells(xCell.Row, ColumnList("PCD Required"))
+    Project("Projected OFA") = Cells(xCell.Row, ColumnList("P_OFA"))
+    Project("Actual OFA") = Trim(Cells(xCell.Row, ColumnList("A_OFA")))
+    Project("Projected Engineering Accept") = Trim(Cells(xCell.Row, ColumnList("P_Eng Accept")))
+    Project("Actual Engineering Accept") = Trim(Cells(xCell.Row, ColumnList("A_Eng Accept")))
+    Project("Projected Engineering Release") = Trim(Cells(xCell.Row, ColumnList("P_Eng Releas")))
+    Project("Actual Engineering Release") = Trim(Cells(xCell.Row, ColumnList("A_Eng Releas")))
+    Project("Projected PCD Release") = Trim(Cells(xCell.Row, ColumnList("P_PCD Releas")))
+    Project("Actual PCD Release") = Trim(Cells(xCell.Row, ColumnList("A_PCD Releas")))
+    Project("Projected Machining Release") = Trim(Cells(xCell.Row, ColumnList("P_Fab Releas")))
+    Project("Projected BuyOff") = Trim(Cells(xCell.Row, ColumnList("P_Buy-Off")))
+    Project("Actual BuyOff") = Trim(Cells(xCell.Row, ColumnList("A_Buy-Off")))
+    Project("Notes") = Split(Trim(Cells(xCell.Row, ColumnList("Notes"))), "||PRIVATE NOTES||")
+End Function
+
+Public Function FormatProjectedActual(xRow, xWorkSheet, projectedDate, actualDate, columnNumber)
+'Check for both projected and actual dates.  If projected dates exist, underline them
+If (projectedDate = "" And actualDate = "") Then
+    With xWorkSheet.Cells(xRow.Row, xRow.Column + columnNumber)
         .Value = ""
-        .Interior.ColorIndex = statusColor
+    End With
+End If
+If (projectedDate = "" And Not actualDate = "") Then
+    With xWorkSheet.Cells(xRow.Row, xRow.Column + columnNumber)
+        .Value = actualDate
+    End With
+End If
+If (Not projectedDate = "" And actualDate = "") Then
+    With xWorkSheet.Cells(xRow.Row, xRow.Column + columnNumber)
+        .Value = projectedDate
+    End With
+    Call UnderlineProjectedDate(xRow, xWorkSheet, projectedDate, columnNumber)
+End If
+If (Not projectedDate = "" And Not actualDate = "") Then
+    With xWorkSheet.Cells(xRow.Row, xRow.Column + columnNumber)
+        .Value = projectedDate & _
+            Chr(10) & _
+            actualDate
+    End With
+    Call UnderlineProjectedDate(xRow, xWorkSheet, projectedDate, columnNumber)
+End If
+End Function
+
+Public Function UnderlineProjectedDate(xRow, xWorkSheet, projectedDate, columnNumber)
+    Dim countProjectedDate As Integer
+    countProjectedDate = Len(projectedDate)
+    With xWorkSheet.Cells(xRow.Row, xRow.Column + columnNumber).Characters(Start:=0, Length:=countProjectedDate).Font
+        .Underline = xlUnderlineStyleSingle
     End With
 End Function
 
-Public Function boldJobNumber(xCell, xSheet)
+Public Function FormatColumns(xWorkSheet)
+    'Copy the header formatting
+    Sheets("Production Schedule").Rows(1).Copy Destination:=xWorkSheet.Rows(1)
+    
+    'Format the columns
+    xWorkSheet.Cells(1, 1).Value = ""
+    xWorkSheet.Cells(1, 2).Value = "Project Info"
+    xWorkSheet.Cells(1, 3).Value = "Description / Status"
+    xWorkSheet.Cells(1, 4).Value = "Eng. Hand-Off"
+    xWorkSheet.Cells(1, 5).Value = "OFA"
+    xWorkSheet.Cells(1, 6).Value = "Eng. Release"
+    xWorkSheet.Cells(1, 7).Value = "PCD Release"
+    xWorkSheet.Cells(1, 8).Value = "Machining Release"
+    xWorkSheet.Cells(1, 9).Value = "Buy Off"
+    xWorkSheet.Cells(1, 10).Value = "Notes"
+    
+    'Delete the blank unused columns
+    xWorkSheet.Columns("AE:K").Delete
+    
+    'Auto Adjust Column Width
+    xWorkSheet.Columns("A").ColumnWidth = 2
+    xWorkSheet.Columns("B:C").ColumnWidth = 35
+    xWorkSheet.Columns("D:I").ColumnWidth = 10
+    xWorkSheet.Columns("J").ColumnWidth = 60
+    
+    'Adjust Row Height
+    xWorkSheet.Range("A:J").WrapText = True
+    xWorkSheet.Range("A:J").EntireRow.AutoFit
+    
+    'Center contents of columns with dates
+    xWorkSheet.Columns("D:I").HorizontalAlignment = xlCenter
+    xWorkSheet.Columns("D:I").VerticalAlignment = xlCenter
+End Function
+
+Public Function BoldJobNumber(xRow, xWorkSheet)
     'Bold the Job Numbers in the Project Info column
     Dim jobString As String
     Dim jobCharCount As Integer
-    jobString = Trim(Split(xSheet.Cells(xCell.Row, xCell.Column + 1).Value, "(")(0))
+    jobString = Project("Number")
     jobCharCount = Len(jobString)
 
     'Output
-    With xSheet.Cells(xCell.Row, xCell.Column + 1).Characters(Start:=1, Length:=jobCharCount).Font
+    With xWorkSheet.Cells(xRow.Row, xRow.Column + 1).Characters(Start:=1, Length:=jobCharCount).Font
         .Name = "Arial Light"
         .FontStyle = "Bold"
         .Size = 12
     End With
 End Function
 
-Public Function boldToolDescription(xCell, xSheet, projectDescription, toolCompleteCount)
+Public Function CheckDash() As String
+    If (Not Project("Tool Incomplete") = "") Then
+        If (Project("Tool Complete") = "") Then
+            CheckDash = Project("Tool Incomplete")
+        Else
+            CheckDash = Project("Tool Complete") & "-" & Project("Tool Incomplete")
+        End If
+    Else
+        If (Project("Tool Complete") = "") Then
+            CheckDash = ""
+        Else
+            CheckDash = Project("Tool Complete")
+        End If
+    End If
+
+End Function
+
+Public Function BoldToolDescription(xRow, xWorkSheet)
     Dim descCount As Integer
-    descCount = Len(projectDescription) + 1
-    With xSheet.Cells(xCell.Row, xCell.Column + 2).Characters(Start:=descCount, Length:=toolCompleteCount).Font
-        .Name = "Arial Light"
-        .FontStyle = "Bold"
-        .Size = 10
-        .Strikethrough = False
-        .Superscript = False
-        .Subscript = False
-        .OutlineFont = False
-        .Shadow = False
-        .Underline = xlUnderlineStyleNone
-        .Color = -16777216
-        .TintAndShade = 0
-        .ThemeFont = xlThemeFontNone
-    End With
+    Dim toolCompleteCount As Integer
+    descCount = Len(Project("Description")) + 1
+    If (Not Project("Tool Complete") = "") Then
+        toolCompleteCount = Len(Project("Tool Complete")) + 1
+    Else
+        toolCompleteCount = 0
+    End If
+    If (Not toolCompleteCount = 0) Then
+        With xWorkSheet.Cells(xRow.Row, xRow.Column + 2).Characters(Start:=descCount, Length:=toolCompleteCount).Font
+            .Name = "Arial Light"
+            .FontStyle = "Bold"
+            .Size = 10
+            .Strikethrough = False
+            .Superscript = False
+            .Subscript = False
+            .OutlineFont = False
+            .Shadow = False
+            .Underline = xlUnderlineStyleNone
+            .Color = -16777216
+            .TintAndShade = 0
+            .ThemeFont = xlThemeFontNone
+        End With
+    End If
 End Function
 
-Public Function formatEngAccepted(xCell, xSheet, engAccepted, columnEngineeringRelease)
-    Dim countEngAccepted As Integer
-    countEngAccepted = Len(engAccepted)
-    With xSheet.Cells(xCell.Row, xCell.Column + 4).Characters(Start:=0, Length:=countEngAccepted).Font
-        .Underline = xlUnderlineStyleSingle
-    End With
-End Function
+Sub FindReplaceAll()
+'PURPOSE: Find & Replace text/values throughout entire workbook
+'SOURCE: www.TheSpreadsheetGuru.com
 
-Public Function formatColumns(xSheet)
-    'Copy the header formatting
-    Sheets("Production Schedule").Rows(1).Copy Destination:=xSheet.Rows(1)
-    
-    'Format the columns
-    xSheet.Cells(1, 1).Value = ""
-    xSheet.Cells(1, 2).Value = "Project Info"
-    xSheet.Cells(1, 3).Value = "Description / Status"
-    xSheet.Cells(1, 4).Value = "OFA"
-    xSheet.Cells(1, 5).Value = "Engineering Release"
-    xSheet.Cells(1, 6).Value = "PCD Release"
-    xSheet.Cells(1, 7).Value = "Machining Release"
-    xSheet.Cells(1, 8).Value = "Assembly Release"
-    xSheet.Cells(1, 9).Value = "Buy Off"
-    xSheet.Cells(1, 10).Value = "Notes"
-    
-    'Delete the blank unused columns
-    xSheet.Columns("U:K").Delete
-    
-    'Auto Adjust Column Width
-    xSheet.Columns("A").ColumnWidth = 2
-    xSheet.Columns("B:C").ColumnWidth = 35
-    xSheet.Columns("D:I").ColumnWidth = 10
-    xSheet.Columns("J").ColumnWidth = 60
-    
-    'Adjust Row Height
-    xSheet.Range("A:J").WrapText = True
-    xSheet.Range("A:J").EntireRow.AutoFit
-    
-    'Center contents of columns with dates
-    xSheet.Columns("D:I").HorizontalAlignment = xlCenter
-    xSheet.Columns("D:I").VerticalAlignment = xlCenter
-End Function
+Dim sht As Worksheet
+Dim fnd As Variant
+Dim rplc As Variant
 
-Public Function ShadeEveryOtherRow(xSheet)
+fnd = "(NULL)"
+rplc = ""
+
+For Each sht In ActiveWorkbook.Worksheets
+  sht.Cells.Replace what:=fnd, Replacement:=rplc, _
+    LookAt:=xlPart, SearchOrder:=xlByRows, MatchCase:=False, _
+    SearchFormat:=False, ReplaceFormat:=False
+Next sht
+
+End Sub
+
+Public Function ShadeEveryOtherRow(xWorkSheet)
     Dim Counter As Integer
 
     'For every row in the UsedRange...
-    For Counter = 1 To xSheet.UsedRange.Rows.Count
+    For Counter = 1 To xWorkSheet.UsedRange.Rows.Count
         'If the row is an odd number...
         If Counter = 1 Then
         ElseIf Counter Mod 2 = 1 Then
-                'Set background to light gray
-                xSheet.Range("B:J").Rows(Counter).Interior.Color = RGB(220, 220, 220)
+            'Set background to light gray
+            xWorkSheet.Range("B:J").Rows(Counter).Interior.Color = RGB(220, 220, 220)
         Else
-                'Set background to white
-                xSheet.Range("B:J").Rows(Counter).Interior.ColorIndex = 0
+            'Set background to white
+            xWorkSheet.Range("B:J").Rows(Counter).Interior.ColorIndex = 0
         End If
     Next
 End Function
 
-Public Function returnSalesman(Salesman) As String
-    If (Salesman = "Mike Johnson") Then
-        returnSalesman = "MJ"
-    ElseIf (Salesman = "Kevin McDonald") Then
-        returnSalesman = "KM"
-    ElseIf (Salesman = "Mike Stevenson") Then
-        returnSalesman = "MS"
-    Else
-        returnSalesman = "NA"
-    End If
-End Function
+Public Sub showForm()
+'Does not work yet
+    Dim currentRow As Integer
+    Dim engineeringDuration As Integer
+    currentRow = 3
+    engineeringDuration = ActiveWorkbook.Worksheets("Source Data").Cells(currentRow, FindColumnInt("Duration Eng"))
+    'MsgBox (FindColumnInt("Duration Eng"))
+    UserForm1.TextBox1.Value = 3
+    UserForm1.TextBox2.Value = engineeringDuration
+    UserForm1.Show
+End Sub
 
-Public Function pageSetup()
-'Setup all Worksheets for printing
-    For Each xWorkSheet In ActiveWorkbook.Worksheets
-        With xWorkSheet.pageSetup
-         .Orientation = xlLandscape
-         .PaperSize = xlPaperTabloid
-         .CenterHorizontally = True
-         .Zoom = False
-         .FitToPagesWide = 1
-         .FitToPagesTall = False
-         .LeftMargin = Application.InchesToPoints(0.25)
-         .RightMargin = Application.InchesToPoints(0.25)
-         .TopMargin = Application.InchesToPoints(0.5)
-         .BottomMargin = Application.InchesToPoints(0.75)
-         .HeaderMargin = Application.InchesToPoints(0.25)
-         .FooterMargin = Application.InchesToPoints(0.25)
-         .PrintTitleRows = "$1:$1"
-        End With
-        
-        'With xWorkSheet.Cells.Font
-        '    .Size = 10
-        '    .Name = "Arial Light"
-        'End With
-    Next
-    
-    'Customizing the columns on a per sheet basis
-    'With Sheets("Unified Industries")
-    '    .Columns("J").Delete
-    'End With
-    With Sheets("Controls Schedule")
-        .Columns("J").Delete
-    End With
-    
-End Function
+Private Sub CollectValues()
+End Sub
+
